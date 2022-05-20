@@ -627,6 +627,31 @@ impl RpcClient {
         self.invoke(self.rpc_client.send_and_confirm_transaction(transaction))
     }
 
+    pub fn send_and_confirm_transaction_with_block_height(
+        &self,
+        transaction: &Transaction,
+        last_valid_block_height: u64,
+    ) -> ClientResult<TransactionStatus> {
+        self.invoke(
+            self.rpc_client
+                .send_and_confirm_transaction_with_block_height(
+                    transaction,
+                    last_valid_block_height,
+                ),
+        )
+    }
+
+    pub fn wait_for_confirmation(
+        &self,
+        signature: &Signature,
+        last_valid_block_height: u64,
+    ) -> ClientResult<TransactionStatus> {
+        self.invoke(
+            self.rpc_client
+                .wait_for_confirmation(signature, last_valid_block_height),
+        )
+    }
+
     pub fn send_and_confirm_transaction_with_spinner(
         &self,
         transaction: &Transaction,

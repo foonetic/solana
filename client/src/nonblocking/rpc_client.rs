@@ -695,6 +695,94 @@ impl RpcClient {
         .into())
     }
 
+    pub async fn send_and_confirm_transaction_with_block_height(
+        &self,
+        transaction: &Transaction,
+        last_valid_block_height: u64,
+    ) -> ClientResult<TransactionStatus> {
+        const SEND_RETRIES: usize = 1;
+        const GET_STATUS_RETRIES: usize = usize::MAX;
+
+        'sending: for _ in 0..SEND_RETRIES {
+            let signature = self.send_transaction(transaction).await?;
+
+            for status_retry in 0..GET_STATUS_RETRIES {
+                match self.get_signature_transaction_status(&signature).await? {
+                    Some(x) => return Ok(x),
+                    None => {
+                        if self.get_block_height().await? > last_valid_block_height {
+                            // Block hash is not found by some reason
+                            break 'sending;
+                        } else if cfg!(not(test))
+                            // Ignore sleep at last step.
+                            && status_retry < GET_STATUS_RETRIES
+                        {
+                            // Retry twice a second
+                            sleep(Duration::from_millis(500)).await;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(RpcError::ForUser(
+            "unable to confirm transaction. \
+             This can happen in situations such as transaction expiration \
+             and insufficient fee-payer funds"
+                .to_string(),
+        )
+        .into())
+    }
+
+    async fn get_signature_transaction_status(
+        &self,
+        signature: &Signature,
+    ) -> ClientResult<Option<TransactionStatus>> {
+        if let Some(x) = self.get_signature_statuses(&[*signature]).await?.value[0].clone() {
+            if x.satisfies_commitment(self.commitment()) {
+                return Ok(Some(x));
+            }
+        }
+
+        return Ok(None);
+    }
+
+    /// wait for confirmation of the transaction. abort the wait until the last_valid_block_height is passed.
+    ///
+    pub async fn wait_for_confirmation(
+        &self,
+        signature: &Signature,
+        last_valid_block_height: u64,
+    ) -> ClientResult<TransactionStatus> {
+        const GET_STATUS_RETRIES: usize = usize::MAX;
+        for status_retry in 0..GET_STATUS_RETRIES {
+            match self.get_signature_transaction_status(&signature).await? {
+                Some(x) => return Ok(x),
+                None => {
+                    if self.get_block_height().await? > last_valid_block_height {
+                        // Block hash is not found by some reason
+                        break;
+                    } else if cfg!(not(test))
+                            // Ignore sleep at last step.
+                            && status_retry < GET_STATUS_RETRIES
+                    {
+                        // Retry twice a second
+                        sleep(Duration::from_millis(500)).await;
+                        continue;
+                    }
+                }
+            }
+        }
+        Err(RpcError::ForUser(
+            "unable to confirm transaction. \
+             This can happen in situations such as transaction expiration \
+             and insufficient fee-payer funds"
+                .to_string(),
+        )
+        .into())
+    }
+
     pub async fn send_and_confirm_transaction_with_spinner(
         &self,
         transaction: &Transaction,
